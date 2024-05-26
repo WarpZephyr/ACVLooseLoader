@@ -3,6 +3,9 @@ Automatically loose loads a Armored Core V PS3 game copy.
 This allows Armored Core V to be run out of its main game archive and make it more moddable.  
 It also allows patches to be made to the game's files to help it run in RPCS3.  
 
+Drag and drop the EBOOT.BIN file from the game folder into the program exe.  
+The path to this will be used to find the needed files.  
+
 # Requirements for use
 The game must be removed from any ISO, zip, 7z, or Rar it is in.  
 
