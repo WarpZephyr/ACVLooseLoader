@@ -169,9 +169,6 @@ namespace ACVLooseLoader
                 }
             }
 
-            string soundFixPath = Path.Combine(resDir, "se_weapon.fsb");
-            bool hasSoundFix = File.Exists(soundFixPath);
-
             string dvdbhdPath = Path.Combine(bindDir, "dvdbnd5.bhd");
             bool needsRename = File.Exists(dvdbhdPath);
 
@@ -193,16 +190,6 @@ namespace ACVLooseLoader
                 Log("Unpacking scripts...");
                 UnpackScripts(usrDir, scriptHeaderPath, scriptDataPath);
 
-                if (hasSoundFix)
-                {
-                    Log("Applying se_weapon.fsb crash patch...");
-                    ApplySoundFix(soundFixPath, Path.Combine(usrDir, "sound", "se_weapon.fsb"));
-                }
-                else
-                {
-                    Log("Warning: Sound fix file se_weapon.fsb not found in program resources, make sure to apply the fix in the \"PS3_GAME/USRDIR/sound/\" folder.");
-                }
-
                 if (needsRename)
                 {
                     Log("Renaming dvdbnd5.bhd to ensure game does not find it...");
@@ -216,6 +203,10 @@ namespace ACVLooseLoader
             }
 
             Log("Finished.");
+            Log("Make sure you apply the sound fix for se_weapon.fsb in:\n" +
+                "[YOUR RPCS3 FOLDER]/dev_hdd0/game/[YOUR GAME REGION CODE]/USRDIR/sound/\n" +
+                "An example path might look like:\n" +
+                "RPCS3/dev_hdd0/game/BLUS30516/USRDIR/sound/");
             Pause();
         }
 
@@ -370,22 +361,6 @@ namespace ACVLooseLoader
                     File.WriteAllBytes(path, file.Bytes);
                 }
             }
-        }
-
-        static void ApplySoundFix(string fixPath, string originalPath)
-        {
-            string backupPath = originalPath + ".bak";
-            if (!File.Exists(backupPath))
-            {
-                File.Move(originalPath, backupPath);
-            }
-
-            if (File.Exists(originalPath))
-            {
-                File.Delete(originalPath);
-            }
-
-            File.Copy(fixPath, originalPath);
         }
 
         static void RenameHeader(string bindDir, string headerPath)
