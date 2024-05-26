@@ -1,8 +1,0 @@
-{
-  "profiles": {
-    "ACVLooseLoader": {
-      "commandName": "Project",
-      "commandLineArgs": "\"C:\\Users\\WarpZephyr\\Documents\\Programs\\RPCS3\\games\\Armored Core V (USA) (En,Fr,Es)\\PS3_GAME\\USRDIR\\EBOOT.BIN\""
-    }
-  }
-}
