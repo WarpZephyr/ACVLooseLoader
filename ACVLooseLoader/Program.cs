@@ -1,7 +1,8 @@
-﻿using SoulsFormats;
-using SoulsFormats.Other.PlayStation3;
+﻿using System.Diagnostics;
 using System.Reflection;
-using System.Runtime.CompilerServices;
+using BinderHandler.Hashes;
+using libps3;
+using SoulsFormats;
 using SFBinder = SoulsFormats.Binder;
 
 namespace ACVLooseLoader
@@ -10,249 +11,559 @@ namespace ACVLooseLoader
     {
         static readonly string ExecutingPath = Assembly.GetExecutingAssembly().Location;
 
+        const int GameTypeCount = 2;
+
+        static readonly Dictionary<GameType, string> DictionaryNames = new(2)
+        {
+            { GameType.ArmoredCoreV, "dict-acv.txt" },
+            { GameType.ArmoredCoreVD, "dict-acvd.txt" }
+        };
+
+        static readonly Logger Logger = new Logger();
+
         static async Task Main(string[] args)
         {
-            if (args.Length != 1)
+#if !DEBUG
+            try
             {
-                Usage();
-                return;
+#endif
+                ConsoleModeManager consoleModeManager = new ConsoleModeManager();
+                
+                // Prevent program from freezing when window is clicked on
+                consoleModeManager.LockConsole();
+
+                // Set up logger for console
+                Logger.RegisterConsoleWriter();
+
+                try
+                {
+                    // Wrap functionality in try catch so user errors can be caught and show a friendlier message without a stacktrace
+                    await ProcessArgumentsAsync(args);
+                }
+                catch (UserErrorException ex)
+                {
+                    Pause(ex.Message);
+                }
+                finally
+                {
+                    // Release lock on quick edit in case the user called from the command line
+                    consoleModeManager.UnlockConsole();
+                    Logger.Dispose();
+                }
+#if !DEBUG
+            }
+            catch (Exception ex)
+            {
+                FinializePause(ex.Message);
+            }
+#endif
+        }
+
+        static async Task ProcessArgumentsAsync(string[] args)
+        {
+            // Show usage
+            if (args.Length < 1)
+            {
+                throw new UserErrorException("This program has no GUI.\n" +
+                "Please drag and drop EBOOT.BIN or default.xex from game files or pass it as an argument.\n" +
+                "This is used to find your game files.");
             }
 
-            var executingFolder = Path.GetDirectoryName(ExecutingPath);
+            LooseLoaderConfig config = new LooseLoaderConfig();
+            LogInfo("Looking for program resource folder...");
+
+            // Determine where program folder is
+            string? executingFolder = Path.GetDirectoryName(ExecutingPath);
+
+            // Get program resource folder path and config path
+            string resDir;
+            string configPath;
             if (string.IsNullOrEmpty(executingFolder))
             {
-                Error($"Error: Could not find folder for program using executing path: {ExecutingPath}");
-                return;
+                resDir = string.Empty;
+                configPath = string.Empty;
+                LogWarn($"Warning: Could not find folder program is in using execution path: {ExecutingPath}.");
+            }
+            else
+            {
+                resDir = Path.Combine(executingFolder, "res");
+                configPath = Path.Combine(executingFolder, "config.txt");
             }
 
-            string path = args[0];
-            if (!path.EndsWith("EBOOT.BIN", StringComparison.InvariantCultureIgnoreCase))
+            // Load config
+            if (configPath != string.Empty && File.Exists(configPath))
             {
-                Error($"Error: File is not named EBOOT.BIN: {path}");
-                return;
+                config.Parse(configPath);
+                LogInfo("Loaded config.");
+            }
+            else
+            {
+                LogWarn("Warning: Could not find config file, defaulting settings.");
             }
 
-            if (!File.Exists(path))
+            // Check if we need to log to a log file
+            if (config.LogToFile)
             {
-                Error($"Error: EBOOT.BIN file does not exist: {path}");
-                return;
-            }
-
-            string? usrDir = Path.GetDirectoryName(path);
-            if (string.IsNullOrEmpty(usrDir) || !usrDir.EndsWith("USRDIR"))
-            {
-                Error($"Error: USRDIR folder could not be found for path: {path}");
-                return;
-            }
-
-            string? ps3GameDir = Path.GetDirectoryName(usrDir);
-            if (string.IsNullOrEmpty(ps3GameDir) || !ps3GameDir.EndsWith("PS3_GAME"))
-            {
-                Error($"Error: PS3_GAME folder could not be found for path: {path}");
-                return;
-            }
-
-            string paramSFOPath = Path.Combine(ps3GameDir, "PARAM.SFO");
-            if (!File.Exists(paramSFOPath))
-            {
-                Error($"Error: PARAM.SFO could not be found in PS3_GAME folder: {ps3GameDir}");
-                return;
-            }
-
-            try
-            {
-                if (PARAMSFO.IsRead(paramSFOPath, out PARAMSFO sfo))
+                if (!string.IsNullOrEmpty(executingFolder))
                 {
-                    if (!IsAcvSFO(sfo))
+                    Logger.RegisterFileWriter(Path.Combine(executingFolder, "log.txt"));
+                }
+                else
+                {
+                    LogWarn($"Warning: Could not setup logging to log file as program folder could not be found.");
+                }
+            }
+
+            Dictionary<GameType, BinderHashDictionary> loadedDictionaries = new Dictionary<GameType, BinderHashDictionary>(Math.Min(GameTypeCount, args.Length));
+            foreach (string arg in args)
+            {
+                LogInfo("Processing next argument...");
+
+                // Get and clean path (things such as slashes can mess stuff up)
+                string rootDir = PathHelper.CleanPath(arg);
+
+                PlatformType platform;
+                GameType game;
+
+                // Determine platform and root
+                if (!config.UseDefaultPlatform)
+                {
+                    LogInfo("Determining root file path and platform...");
+                    platform = DeterminePlatform(ref rootDir);
+                }
+                else
+                {
+                    LogInfo("Using default platform and determining root path...");
+                    platform = config.DefaultPlatform;
+                    DetermineRoot(ref rootDir, platform);
+                }
+
+                // Determine game
+                if (!config.UseDefaultGame)
+                {
+                    LogInfo("Determining game...");
+                    game = DetermineGameType(platform, rootDir);
+                }
+                else
+                {
+                    LogInfo("Using default game.");
+                    game = config.DefaultGame;
+                }
+
+                LogInfo($"Determined platform as {platform} and game as {game}.");
+
+                // Whether or not to skip every step that requires the bind directory
+                if (!(config.SkipMainArchiveUnpack && config.SkipBootBinderUnpack && config.SkipMapUnpack && config.SkipScriptUnpack))
+                {
+                    // Get the bind folder
+                    string bindDir = Path.Combine(rootDir, "bind");
+                    if (!Directory.Exists(bindDir))
                     {
-                        Error($"Error: Could not identify PARAM.SFO game as Armored Core V: {paramSFOPath}");
-                        return;
-                    }
-                }
-                else
-                {
-                    Error($"Error: PARAM.SFO file was not a valid PARAM.SFO: {paramSFOPath}");
-                    return;
-                }
-            }
-            catch (Exception ex)
-            {
-                Error($"Error: PARAM.SFO checking failed: {paramSFOPath}\n{ex}");
-                return;
-            }
-
-            string bindDir = Path.Combine(usrDir, "bind");
-            if (!Directory.Exists(bindDir))
-            {
-                Error("Error: Could not find bind folder path, please unpack the game using DVDUnbinder or another tool first,\n" +
-                    "Then move the unpacked files into the \"PS3_GAME/USRDIR/\" folder.");
-                return;
-            }
-
-            string resDir = Path.Combine(executingFolder, "res");
-            string dictionaryPath = Path.Combine(resDir, "dict-acv.txt");
-
-            try
-            {
-                if (File.Exists(dictionaryPath))
-                {
-                    // Unpack game files
-                    await UnpackGameAsync(usrDir, bindDir, dictionaryPath);
-                }
-                else
-                {
-                    Log("Warning: Cannot find dictionary for game file names in program resources, assuming game is unpacked and continuing.");
-                }
-            }
-            catch (Exception ex)
-            {
-                Error($"Error: Failed trying to unpack game files:\n{ex}");
-            }
-
-            string missionPath = Path.Combine(bindDir, "mission");
-            if (!Directory.Exists(missionPath))
-            {
-                Error("Error: Could not find mission binder path, game has not unpacked correctly,\n" +
-                    "Make sure this tool has the dictionary file in resources to unpack the game,\n" +
-                    "Or use tools such as DVDUnbinder to manually unpack the game,\n" +
-                    "Then move the unpacked files into the \"PS3_GAME/USRDIR/\" folder.");
-                return;
-            }
-
-            string scriptHeaderPath = Path.Combine(bindDir, "script.bhd");
-            string scriptHeaderSdatPath = scriptHeaderPath + ".sdat";
-            if (!File.Exists(scriptHeaderPath))
-            {
-                string scriptHeaderResPath = Path.Combine(resDir, "script.bhd");
-                if (File.Exists(scriptHeaderResPath))
-                {
-                    Log("Found decrypted script header file in program resources...");
-                    scriptHeaderPath = scriptHeaderResPath;
-                }
-                else
-                {
-                    if (File.Exists(scriptHeaderSdatPath))
-                    {
-                        Error("Error: Scripts are still encrypted, could not find decrypted script.bhd.\n" +
-                            "Please decrypt it first with a tool such as TrueAncestor Edat Rebuilder or find a decrypted copy.\n" +
-                            "Place script.bhd into the \"PS3_GAME/USRDIR/bind/\" folder or the program \"res\" folder.");
-                        return;
+                        throw new UserErrorException("Error: Could not find bind folder path, you are missing files or an incorrect path was provided.");
                     }
 
-                    Error($"Error: Could not find scripts header file script.bhd or its encrypted counterpart script.bhd.sdat.\n You may be missing files.");
-                    return;
-                }
-            }
-
-            string scriptDataPath = Path.Combine(bindDir, "script.bdt");
-            string scriptDataSdatPath = scriptDataPath + ".sdat";
-            if (!File.Exists(scriptDataPath))
-            {
-                string scriptDataResPath = Path.Combine(resDir, "script.bdt");
-                if (File.Exists(scriptDataResPath))
-                {
-                    Log("Found decrypted script data file in program resources...");
-                    scriptDataPath = scriptDataResPath;
-                }
-                else
-                {
-                    if (File.Exists(scriptDataSdatPath))
+                    // Find dictionary
+                    if (!loadedDictionaries.TryGetValue(game, out BinderHashDictionary? dictionary))
                     {
-                        Error("Error: Scripts are still encrypted, could not find decrypted script.bdt.\n" +
-                            "Please decrypt it first with a tool such as TrueAncestor Edat Rebuilder or find a decrypted copy.\n" +
-                            "Place script.bdt into the \"PS3_GAME/USRDIR/bind/\" folder or the program \"res\" folder.");
-                        return;
+                        // Only check for dictionary in resources if the program resource folder was found
+                        if (resDir != string.Empty)
+                        {
+                            // Try to find dictionary in resources
+                            string dictionaryPath = Path.Combine(resDir, DictionaryNames[game]);
+                            if (File.Exists(dictionaryPath))
+                            {
+                                dictionary = BinderHashDictionary.FromPath(dictionaryPath, false);
+                                loadedDictionaries.Add(game, dictionary);
+                            }
+                        }
                     }
 
-                    Error($"Error: Could not find scripts data file script.bdt or its encrypted counterpart script.bdt.sdat.\n You may be missing files.");
-                    return;
-                }
-            }
-
-            string dvdbhdPath = Path.Combine(bindDir, "dvdbnd5.bhd");
-            bool needsRename = File.Exists(dvdbhdPath);
-
-            try
-            {
-                // Unpack maps
-                Log("Unpacking maps...");
-                BinderHelper.MassUnpackBinders(missionPath, usrDir, false, true);
-
-                // Pack map models and textures
-                Log("Packing models and textures in each map...");
-                PackAcvMapResources(Path.Combine(usrDir, "model", "map"));
-
-                // Unpack boot.bnd and boot_2nd.bnd
-                Log("Unpacking boot binders...");
-                BinderHelper.MassUnpackBinders(bindDir, usrDir, false, true);
-
-                // Unpack script.bhd and script.bdt
-                Log("Unpacking scripts...");
-                UnpackScripts(usrDir, scriptHeaderPath, scriptDataPath);
-
-                if (needsRename)
-                {
-                    Log("Renaming dvdbnd5.bhd to ensure game does not find it...");
-                    RenameHeader(bindDir, dvdbhdPath);
-                }
-            }
-            catch (Exception ex)
-            {
-                Error($"Error: An error has occurred while loose loading:\n{ex}");
-                return;
-            }
-
-            Log("Finished.");
-            Log("Make sure you apply the sound fix for se_weapon.fsb in:\n" +
-                "[YOUR RPCS3 FOLDER]/dev_hdd0/game/[YOUR GAME REGION CODE]/USRDIR/sound/\n" +
-                "An example path might look like:\n" +
-                "RPCS3/dev_hdd0/game/BLUS30516/USRDIR/sound/");
-            Pause();
-        }
-
-        static async Task UnpackGameAsync(string usrDir, string bindDir, string dictionaryPath)
-        {
-            string bhdPath = Path.Combine(bindDir, "dvdbnd5.bhd");
-            if (!File.Exists(bhdPath))
-            {
-                Log("Could not find dvdbnd5.bhd, assuming game files are unpacked already...");
-                return;
-            }
-
-            string bdtPath = Path.Combine(bindDir, "dvdbnd.bdt");
-            if (!File.Exists(bdtPath))
-            {
-                Log("Could not find dvdbnd.bdt, assuming game files are unpacked already...");
-                return;
-            }
-
-            Log("Attempting to unpack game files from main archive...");
-
-            int maxProgress = Console.WindowWidth - 1;
-            int lastProgress = 0;
-            void ReportProgress(double value)
-            {
-                int nextProgress = (int)Math.Ceiling(value * maxProgress);
-                if (nextProgress > lastProgress)
-                {
-                    for (int i = lastProgress; i < nextProgress; i++)
+                    // Unpack main archives
+                    if (!config.SkipMainArchiveUnpack)
                     {
-                        if (i == 0)
-                            Console.Write('[');
-                        else if (i == maxProgress - 1)
-                            Console.Write(']');
+                        // Unpack if a dictionary was found
+                        if (dictionary is not null)
+                        {
+                            if (game == GameType.ArmoredCoreV)
+                            {
+                                await UnpackDvdBinderAsync(rootDir, bindDir, "dvdbnd5.bhd", "dvdbnd.bdt", dictionary, config.SkipHiddenMainArchiveUnpack, config.SkipExistingFiles, config.SkipUnknownFiles);
+                            }
+                            else if (game == GameType.ArmoredCoreVD)
+                            {
+                                await UnpackDvdBinderAsync(rootDir, bindDir, "dvdbnd5_layer0.bhd", "dvdbnd_layer0.bdt", dictionary, config.SkipHiddenMainArchiveUnpack, config.SkipExistingFiles, config.SkipUnknownFiles);
+                                if (platform == PlatformType.Xbox360)
+                                {
+                                    await UnpackDvdBinderAsync(rootDir, bindDir, "dvdbnd5_layer1.bhd", "dvdbnd_layer1.bdt", dictionary, config.SkipHiddenMainArchiveUnpack, config.SkipExistingFiles, config.SkipUnknownFiles);
+                                }
+                            }
+                        }
                         else
-                            Console.Write('=');
+                        {
+                            LogWarn($"Warning: No dictionary found for {game}, assuming game files are unpacked and continuing.");
+                        }
                     }
-                    lastProgress = nextProgress;
+                    else
+                    {
+                        LogInfo("Skipping unpacking main archives.");
+                    }
+
+                    // Hide headers
+                    if (config.HideHeaders)
+                    {
+                        RenameHeader(bindDir, platform, game);
+                    }
+                    else
+                    {
+                        LogInfo("Skipping hiding main archive headers.");
+                    }
+
+                    // Unpack boot.bnd and boot_2nd.bnd
+                    if (!config.SkipBootBinderUnpack)
+                    {
+                        LogInfo("Unpacking boot binders...");
+                        BinderHelper.MassUnpackBinders(bindDir, rootDir, "boot*", false, true, config.SkipExistingFiles);
+                        LogInfo("Unpacked boot binders.");
+                    }
+                    else
+                    {
+                        LogInfo("Skipping unpacking boot binders.");
+                    }
+
+                    // Unpack scripts
+                    if (!config.SkipScriptUnpack)
+                    {
+                        // Get and check the script binder header and data file paths
+                        string scriptHeaderPath = GetScriptBindPath("script.bhd", [rootDir, resDir], platform);
+                        string scriptDataPath = GetScriptBindPath("script.bdt", [rootDir, resDir], platform);
+
+                        // Unpack script.bhd and script.bdt
+                        LogInfo("Checking scripts...");
+                        UnpackScripts(rootDir, scriptHeaderPath, scriptDataPath, platform, config.SkipExistingFiles);
+                    }
+                    else
+                    {
+                        LogInfo("Skipping unpacking scripts.");
+                    }
+
+                    // Unpack maps
+                    if (!config.SkipMapUnpack)
+                    {
+                        LogInfo("Attempting to unpack maps...");
+
+                        // Get the bind/mission/ folder
+                        string missionBindDir = Path.Combine(bindDir, "mission");
+                        if (!Directory.Exists(missionBindDir))
+                        {
+                            throw new UserErrorException(
+                                "Error: Could not find mission binder path, game was not unpacked correctly or is missing files.\n" +
+                                "Make sure this tool has the dictionary file in the program resources folder to unpack the game.\n" +
+                                "Tools such as DVDUnbinder can manually unpack the game.\n" +
+                                "Once unpacked, move the unpacked files into:\n" +
+                                "- The \"/PS3_GAME/USRDIR/\" folder on PS3 for disc.\n" +
+                                "- The \"/USRDIR/\" folder on PS3 for digital.\n" +
+                                "- The game folder directly on Xbox 360.");
+                        }
+
+                        BinderHelper.MassUnpackBinders(missionBindDir, rootDir, "*.bnd", false, true, config.SkipExistingFiles);
+                        LogInfo("Unpacked maps.");
+                    }
+                }
+                else
+                {
+                    LogInfo("Every step requiring bind folder skipped.");
+                }
+
+                // Pack map resources
+                if (game == GameType.ArmoredCoreV)
+                {
+                    if (!config.SkipMapResourcePack)
+                    {
+                        // Pack map models and textures
+                        LogInfo("Packing models and textures in each map...");
+                        PackAcvMapResources(Path.Combine(rootDir, "model", "map"), config.SkipExistingFiles);
+                        LogInfo("Packed models and textures in each map.");
+                    }
+                    else
+                    {
+                        LogInfo("Skipping packing map resources.");
+                    }
+                }
+
+                // Apply FMOD crash fix
+                if (platform == PlatformType.PS3)
+                {
+                    if (config.ApplyFmodCrashFix)
+                    {
+                        ApplyFmodCrashFix(rootDir);
+                    }
+                    else
+                    {
+                        LogInfo("Skipping applying FMOD crash fix.");
+                    }
+                }
+
+                LogInfo("Finished processing argument.");
+            }
+
+            if (config.PauseOnFinish)
+            {
+                Pause("Finished.");
+            }
+            else
+            {
+                LogInfo("Finished.");
+            }
+        }
+
+        #region Helpers
+
+        static void DetermineRoot(ref string root, PlatformType platform)
+        {
+            // Only set if path was a file we are looking for
+            static void SetRoot(ref string root, string file)
+            {
+                if (root != file)
+                {
+                    root = PathHelper.GetDirectoryName(file, $"Error: Could not get root game folder from path: {root}");
                 }
             }
 
-            var cts = new CancellationTokenSource();
-            await BinderHandler.Binder.UnpackFromPathsAsync(bhdPath, bdtPath, dictionaryPath, usrDir, BHD5.Game.DarkSouls1, null, new Progress<double>(ReportProgress), cts.Token);
+            // Check possible executables
+            // If an executable is found set the root directory
+            static bool CheckFile(ref string root, string file, PlatformType platform)
+            {
+                if (File.Exists(file))
+                {
+                    string name = Path.GetFileName(file);
+                    if (platform == PlatformType.PS3)
+                    {
+                        if (name.Equals("EBOOT.BIN", StringComparison.InvariantCultureIgnoreCase))
+                        {
+                            SetRoot(ref root, file);
+                            return true;
+                        }
+                        else if (name.EndsWith(".elf", StringComparison.InvariantCultureIgnoreCase))
+                        {
+                            SetRoot(ref root, file);
+                            return true;
+                        }
+                    }
+                    else if (platform == PlatformType.Xbox360)
+                    {
+                        if (name.EndsWith(".xex", StringComparison.InvariantCultureIgnoreCase))
+                        {
+                            SetRoot(ref root, file);
+                            return true;
+                        }
+                    }
+                }
+
+                return false;
+            }
+
+            // Get the possibly directories,
+            // Then check the possible executables inside of them
+            static bool CheckFolderFile(ref string root, string folder, PlatformType platform)
+            {
+                if (platform == PlatformType.PS3)
+                {
+                    if (CheckFile(ref root, Path.Combine(folder, "EBOOT.BIN"), platform))
+                    {
+                        return true;
+                    }
+
+                    if (CheckFile(ref root, Path.Combine(folder, "EBOOT.elf"), platform))
+                    {
+                        return true;
+                    }
+                }
+                else if (platform == PlatformType.Xbox360)
+                {
+
+                    if (CheckFile(ref root, Path.Combine(root, "default.xex"), platform))
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+
+            // Do search
+            if (CheckFile(ref root, root, platform))
+            {
+                return;
+            }
+            else if (Directory.Exists(root))
+            {
+                if (CheckFolderFile(ref root, Path.Combine(root, "PS3_GAME", "USRDIR"), platform))
+                {
+                    return;
+                }
+                else if (CheckFolderFile(ref root, Path.Combine(root, "USRDIR"), platform))
+                {
+                    return;
+                }
+                else if (CheckFolderFile(ref root, root, platform))
+                {
+                    return;
+                }
+            }
+
+            throw new UserErrorException($"Cannot determine root path from {nameof(PlatformType)} {platform} and path: {root}");
         }
 
-        static bool IsAcvSFO(PARAMSFO sfo)
+        static PlatformType DeterminePlatform(ref string root)
+        {
+            // Only set if path was a file we are looking for
+            static void SetRoot(ref string root, string file)
+            {
+                if (root != file)
+                {
+                    root = PathHelper.GetDirectoryName(file, $"Error: Could not get root game folder from path: {root}");
+                }
+            }
+
+            // Check possible executables
+            // If an executable is found set the root directory
+            static bool CheckFile(ref string root, string file, out PlatformType platform)
+            {
+                if (File.Exists(file))
+                {
+                    string name = Path.GetFileName(file);
+                    if (name.Equals("EBOOT.BIN", StringComparison.InvariantCultureIgnoreCase))
+                    {
+                        SetRoot(ref root, file);
+                        platform = PlatformType.PS3;
+                        return true;
+                    }
+                    else if (name.EndsWith(".xex", StringComparison.InvariantCultureIgnoreCase))
+                    {
+                        SetRoot(ref root, file);
+                        platform = PlatformType.Xbox360;
+                        return true;
+                    }
+                    // Less likely
+                    else if (name.EndsWith(".elf", StringComparison.InvariantCultureIgnoreCase))
+                    {
+                        SetRoot(ref root, file);
+                        platform = PlatformType.PS3;
+                        return true;
+                    }
+                }
+
+                platform = default;
+                return false;
+            }
+
+            // Get the possibly directories,
+            // Then check the possible executables inside of them
+            static bool CheckFolderFile(ref string root, string folder, out PlatformType platform)
+            {
+                if (CheckFile(ref root, Path.Combine(folder, "EBOOT.BIN"), out platform))
+                {
+                    return true;
+                }
+
+                if (CheckFile(ref root, Path.Combine(folder, "EBOOT.elf"), out platform))
+                {
+                    return true;
+                }
+
+                if (CheckFile(ref root, Path.Combine(root, "default.xex"), out platform))
+                {
+                    return true;
+                }
+
+                return false;
+            }
+
+            // Do search
+            if (CheckFile(ref root, root, out PlatformType platform))
+            {
+                return platform;
+            }
+            else if (Directory.Exists(root))
+            {
+                if (CheckFolderFile(ref root, Path.Combine(root, "PS3_GAME", "USRDIR"), out platform))
+                {
+                    return platform;
+                }
+                else if (CheckFolderFile(ref root, Path.Combine(root, "USRDIR"), out platform))
+                {
+                    return platform;
+                }
+                else if (CheckFolderFile(ref root, root, out platform))
+                {
+                    return platform;
+                }
+            }
+
+            throw new UserErrorException($"Cannot determine {nameof(PlatformType)} from path: {root}");
+        }
+
+        static GameType DetermineGameType(PlatformType platform, string rootDir)
+        {
+            // No inline since both uses appear in the same scope
+            GameType game;
+
+            if (platform == PlatformType.PS3)
+            {
+                LogInfo("Attempting to determine game by PARAM.SFO...");
+
+                // Get the USRDIR folder
+                if (rootDir.EndsWith("USRDIR"))
+                {
+                    // Get the PS3_GAME folder (disc) or root game folder (digital).
+                    string? parentDir = Path.GetDirectoryName(rootDir);
+                    if (!string.IsNullOrEmpty(parentDir))
+                    {
+                        // Determine which game we are loose loading for by PARAM.SFO
+                        string sfoPath = Path.Combine(parentDir, "PARAM.SFO");
+                        if (File.Exists(sfoPath)
+                            && PARAMSFO.IsRead(sfoPath, out PARAMSFO? sfo)
+                            && TryDetermineGameBySFO(sfo, out game))
+                        {
+                            return game;
+                        }
+                    }
+                }
+
+                LogWarn("Warning: PARAM.SFO could not be found or was invalid.");
+            }
+
+            // Determine which game we are loose loading for by files
+            LogInfo("Attempting to determine game by checking files...");
+            if (TryDetermineGameByFiles(rootDir, out game))
+            {
+                return game;
+            }
+
+            throw new UserErrorException($"Game could not be determined from {nameof(PlatformType)} {platform} and path: {rootDir}");
+        }
+
+        static bool TryDetermineGameByFiles(string rootDir, out GameType game)
+        {
+            string bindDir = Path.Combine(rootDir, "bind");
+            string acvPath = Path.Combine(bindDir, "dvdbnd.bdt");
+            if (File.Exists(acvPath))
+            {
+                game = GameType.ArmoredCoreV;
+                return true;
+            }
+
+            string acvdPath = Path.Combine(bindDir, "dvdbnd_layer0.bdt");
+            if (File.Exists(acvdPath))
+            {
+                game = GameType.ArmoredCoreVD;
+                return true;
+            }
+
+            game = default;
+            return false;
+        }
+
+        static bool TryDetermineGameBySFO(PARAMSFO sfo, out GameType game)
         {
             // Try to find the title name
             if (sfo.Parameters.TryGetValue("TITLE", out PARAMSFO.Parameter? parameter))
@@ -260,6 +571,10 @@ namespace ACVLooseLoader
                 switch (parameter.Data)
                 {
                     case "ARMORED CORE V":
+                        game = GameType.ArmoredCoreV;
+                        return true;
+                    case "Armored Core Verdict Day":
+                        game = GameType.ArmoredCoreVD;
                         return true;
                 }
             }
@@ -274,76 +589,194 @@ namespace ACVLooseLoader
                     case "BLJM60378":
                     case "BLUS30516":
                     case "BLES01440":
+                        game = GameType.ArmoredCoreV;
+                        return true;
+                    case "BLKS20441":
+                    case "BLAS50618":
+                    case "BLJM61014":
+                    case "BLJM61020":
+                    case "BLUS31194":
+                    case "BLES01898":
+                    case "NPUB31245":
+                    case "NPEB01428":
+                        game = GameType.ArmoredCoreVD;
                         return true;
                 }
             }
 
+            game = default;
             return false;
         }
 
-        static void PackAcvMapResources(string dir)
+        static async Task UnpackDvdBinderAsync(string rootDir, string bindDir, string bhdName, string bdtName, BinderHashDictionary dictionary, bool skipHidden, bool skipExisting, bool skipUnknown)
+        {
+            string bhdPath = Path.Combine(bindDir, bhdName);
+            if (!File.Exists(bhdPath))
+            {
+                bhdPath = Path.Combine(bindDir, '-' + bhdName);
+                if (File.Exists(bhdPath))
+                {
+                    if (skipHidden)
+                    {
+                        LogInfo($"Skipping unpacking hidden {bhdName}");
+                        return;
+                    }
+
+                    LogWarn($"Warning: Found hidden {bhdName}, game files from {bhdName} may already be unpacked.");
+                }
+                else
+                {
+                    LogWarn($"Warning: Could not find {bhdName}, assuming game files from {bhdName} are unpacked already.");
+                    return;
+                }
+                
+            }
+
+            string bdtPath = Path.Combine(bindDir, bdtName);
+            if (!File.Exists(bdtPath))
+            {
+                LogWarn($"Warning: Could not find {bdtName}, assuming game files from {bhdName} are unpacked already.");
+                return;
+            }
+
+            LogInfo($"Unpacking game files from {bhdName} archive...");
+
+            var binder = BinderHandler.Binder.FromPathToBinderHeader5(bhdPath, null, BHD5.Game.DarkSouls1, dictionary);
+            binder.SkipExistingFiles = skipExisting;
+            binder.SkipUnknownFiles = skipUnknown;
+
+            using (var pb = new ConsoleProgressBar())
+            {
+                await binder.UnpackDataFromPathAsync(bdtPath, rootDir, pb, new CancellationTokenSource().Token);
+            }
+
+            Logger.WriteTo("Console", " Done.\n");
+            LogInfo($"Unpacked game files from {bhdName} archive.");
+        }
+
+        static void PackAcvMapResources(string dir, bool skipExisting)
         {
             foreach (var directory in Directory.EnumerateDirectories(dir, "m*", SearchOption.TopDirectoryOnly))
             {
-                Log($"Packing map models and textures in {Path.GetFileNameWithoutExtension(directory)}...");
-                PackAcvMap(directory);
+                LogInfo($"Packing map models and textures in {Path.GetFileNameWithoutExtension(directory)}...");
+                PackAcvMap(directory, skipExisting);
             }
         }
 
-        static void PackAcvMap(string dir)
+        static void PackAcvMap(string dir, bool skipExisting)
         {
-            var modelBND = BinderHelper.PackFilesIntoBinder3(dir, [".flv", ".hmd", ".smd", ".mlb"], false);
-            var textureBND = BinderHelper.PackFilesIntoBinder3(dir, false, ".tpf.dcx");
-            SetAcvMapBinderInfo(modelBND);
-            SetAcvMapBinderInfo(textureBND);
-            string mapID = dir.Split(Path.DirectorySeparatorChar).Last();
-            modelBND.Write(Path.Combine(dir, $"{mapID}_m.dcx.bnd"));
-            textureBND.Write(Path.Combine(dir, $"{mapID}_htdcx.bnd"));
-        }
-
-        static void SetAcvMapBinderInfo(BND3 binder)
-        {
-            binder.Version = "JP100";
-            binder.Compression = DCX.Type.None;
-            binder.Format = SFBinder.Format.IDs | SFBinder.Format.Names1 | SFBinder.Format.Compression;
-            binder.BitBigEndian = true;
-            binder.BigEndian = true;
-            binder.Unk18 = 0;
-
-            int fileID = 0;
-            for (int i = 0; i < binder.Files.Count; i++)
+            static void SetAcvMapBinderInfo(BND3 binder)
             {
-                binder.Files[i].Flags = SFBinder.FileFlags.Flag1;
-                binder.Files[i].ID = fileID;
-                fileID++;
+                binder.Version = "JP100";
+                binder.Compression = DCX.Type.None;
+                binder.Format = SFBinder.Format.IDs | SFBinder.Format.Names1 | SFBinder.Format.Compression;
+                binder.BitBigEndian = true;
+                binder.BigEndian = true;
+                binder.Unk18 = 0;
+
+                for (int i = 0; i < binder.Files.Count; i++)
+                {
+                    binder.Files[i].Flags = SFBinder.FileFlags.Flag1;
+                    binder.Files[i].ID = i;
+                }
+            }
+
+            string mapID = Path.GetFileName(dir);
+            string modelBNDPath = Path.Combine(dir, $"{mapID}_m.dcx.bnd");
+            if (!(skipExisting && File.Exists(modelBNDPath)))
+            {
+                var modelBND = BinderHelper.PackFilesIntoBinder3(dir, [".flv", ".hmd", ".smd", ".mlb"], false);
+                SetAcvMapBinderInfo(modelBND);
+                modelBND.Write();
+            }
+            else
+            {
+                LogInfo($"Skipping packing existing model files for {mapID}");
+            }
+
+            string textureBNDPath = Path.Combine(dir, $"{mapID}_htdcx.bnd");
+            if (!(skipExisting && File.Exists(modelBNDPath)))
+            {
+                var textureBND = BinderHelper.PackFilesIntoBinder3(dir, ".tpf.dcx", "_l.tpf.dcx", false);
+                SetAcvMapBinderInfo(textureBND);
+                textureBND.Write();
+            }
+            else
+            {
+                LogInfo($"Skipping packing existing texture files for {mapID}");
             }
         }
 
-        static void UnpackScripts(string usrDir, string headerPath, string dataPath)
+        static string GetScriptBindPath(string name, Span<string> roots, PlatformType platform)
+        {
+            foreach (string root in roots)
+            {
+                string scriptPath = Path.Combine(root, "bind", name);
+                if (File.Exists(scriptPath))
+                {
+                    LogInfo($"Found {name} path");
+                    return scriptPath;
+                }
+                else if (platform == PlatformType.PS3)
+                {
+                    string scriptSdatPath = scriptPath + ".sdat";
+                    if (File.Exists(scriptSdatPath))
+                    {
+                        LogInfo($"Found encrypted {name} path");
+                        return scriptSdatPath;
+                    }
+                }
+            }
+
+            LogWarn($"Warning: Could not find {name} path, you may be missing files.");
+            return string.Empty;
+        }
+
+        static void UnpackScripts(string usrDir, string headerPath, string dataPath, PlatformType platform, bool skipExisting)
         {
             string aiScriptDir = Path.Combine(usrDir, "airesource", "script");
             string sceneScriptDir = Path.Combine(usrDir, "scene");
 
-            if (File.Exists(aiScriptDir))
+            if (string.IsNullOrEmpty(headerPath) || string.IsNullOrEmpty(dataPath))
             {
-                throw new InvalidOperationException($"AI Script path must not be a file: {aiScriptDir}");
+                LogWarn("Warning: Scripts header or data file path could not be determined, skipping script unpacking.");
             }
 
-            if (File.Exists(sceneScriptDir))
+            // Check for PS3 SDAT encryption
+            if (platform == PlatformType.PS3)
             {
-                throw new InvalidOperationException($"Scene Script path must not be a file: {sceneScriptDir}");
+                LogInfo("Checking scripts for encryption...");
+                if (headerPath.EndsWith(".sdat") && NPD.Is(headerPath))
+                {
+                    LogInfo("Decrypting scripts header file...");
+
+                    string headerSdatPath = headerPath;
+                    headerPath = headerPath.Replace(".sdat", string.Empty); // Replace path with removed .sdat
+                    EDAT.DecryptSdatFile(headerSdatPath, headerPath);
+                    LogInfo("Decrypted scripts header file.");
+                }
+
+                if (dataPath.EndsWith(".sdat") && NPD.Is(dataPath))
+                {
+                    LogInfo("Decrypting scripts data file...");
+
+                    string dataSdatPath = dataPath;
+                    dataPath = dataPath.Replace(".sdat", string.Empty); // Replace path with removed .sdat
+                    EDAT.DecryptSdatFile(dataSdatPath, dataPath);
+                    LogInfo("Decrypted scripts data file.");
+                }
             }
 
+            // Check header file
             if (!BXF3.IsHeader(headerPath))
             {
-                throw new InvalidDataException($"Script header file is not a BHF3: {headerPath}");
+                throw new UserErrorException($"Script header file is not a BHF3: {headerPath}");
             }
 
-            if (!BXF3.IsData(dataPath))
-            {
-                throw new InvalidDataException($"Script data file is not a BDF3: {dataPath}");
-            }
+            // Data file is not always guaranteed to have a "BDF3" header and so on.
+            // So checking that one is skipped.
 
+            LogInfo("Unpacking scripts...");
             BXF3 binder = BXF3.Read(headerPath, dataPath);
             foreach (var file in binder.Files)
             {
@@ -351,57 +784,135 @@ namespace ACVLooseLoader
                 if (name.EndsWith("scene.lc"))
                 {
                     string path = Path.Combine(sceneScriptDir, name);
-                    Directory.CreateDirectory(PathHandler.GetDirectoryName(path, $"Error: Could not get folder name for scene script: {name}"));
+                    if (skipExisting && File.Exists(path))
+                    {
+                        continue;
+                    }
+
+                    string? dir = PathHelper.GetDirectoryName(path, $"Error: Could not get folder name for scene script: {name}");
+                    Directory.CreateDirectory(dir);
+
                     File.WriteAllBytes(path, file.Bytes);
                 }
                 else
                 {
                     string path = Path.Combine(aiScriptDir, name);
-                    Directory.CreateDirectory(PathHandler.GetDirectoryName(path, $"Error: Could not get folder name for AI script: {name}"));
+                    if (skipExisting && File.Exists(path))
+                    {
+                        continue;
+                    }
+
+                    Directory.CreateDirectory(PathHelper.GetDirectoryName(path, $"Error: Could not get folder name for AI script: {name}"));
                     File.WriteAllBytes(path, file.Bytes);
+                }
+            }
+
+            LogInfo("Unpacked scripts.");
+        }
+
+        static void RenameHeader(string bindDir, PlatformType platform, GameType game)
+        {
+            static void Rename(string bindDir, string name)
+            {
+                string path = Path.Combine(bindDir, name);
+                if (!File.Exists(path))
+                {
+                    return;
+                }
+
+                if (!name.StartsWith('-'))
+                {
+                    LogInfo($"Renaming {name} to ensure game does not find it...");
+
+                    string newPath = Path.Combine(bindDir, $"-{name}");
+                    File.Move(path, newPath);
+                    LogInfo($"Renamed {name} to -{name}");
+                }
+            }
+
+            if (game == GameType.ArmoredCoreV)
+            {
+                Rename(bindDir, "dvdbnd5.bhd");
+            }
+            else if(game == GameType.ArmoredCoreVD)
+            {
+                Rename(bindDir, "dvdbnd5_layer0.bhd");
+                if (platform == PlatformType.Xbox360)
+                {
+                    Rename(bindDir, "dvdbnd5_layer1.bhd");
                 }
             }
         }
 
-        static void RenameHeader(string bindDir, string headerPath)
+        static void ApplyFmodCrashFix(string usrDir)
         {
-            if (!File.Exists(headerPath))
-            {
-                return;
-            }
+            string soundDir = Path.Combine(usrDir, "sound");
+            string seWeaponPath = Path.Combine(soundDir, "se_weapon.fsb");
+            FileInfo soundFI = new FileInfo(seWeaponPath);
 
-            string newName = "-dvdbnd5.bhd";
-            string newPath = Path.Combine(bindDir, newName);
-            while (File.Exists(newPath))
+            int expandLength = 20_000_000;
+            if (soundFI.Exists && soundFI.Length < expandLength)
             {
-                newName = '-' + newName;
-                newPath = Path.Combine(newPath, newName);
+                LogInfo("Expanding se_weapon.fsb to fix fmod crash...");
+                Expand(seWeaponPath, expandLength);
+                LogInfo("Expanded se_weapon.fsb");
             }
-
-            File.Move(headerPath, newPath);
         }
 
-        static void Usage()
+        #endregion
+
+        #region Utilities
+
+        static void Expand(string path, int length, int chunkSize = 65536)
         {
-            Log("This program has no GUI.\n" +
-                "Please drag and drop EBOOT.BIN from game files or pass it as an argument.\n" +
-                "This is used to find your game files.");
+            using FileStream fs = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.Read, chunkSize);
+
+            int totalChunks = length / chunkSize;
+            for (int i = 0; i < totalChunks; i++)
+            {
+                fs.Write(new byte[chunkSize], 0, chunkSize);
+                length -= chunkSize;
+            }
+
+            fs.Write(new byte[length], 0, length);
+        }
+
+        static void Pause(string message)
+        {
+            Log(message);
             Pause();
         }
 
-        static void Error(string str)
-        {
-            Log(str);
-            Pause();
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        static void Log(string str)
-            => Console.WriteLine(str);
-
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         static void Pause()
-            => Console.ReadKey();
+        {
+            // Discard each key from the buffer so we pause when we want to using Console.ReadKey
+            // While there are characters in the input stream 
+            while (Console.KeyAvailable)
+            {
+                // Read them and ignore them
+                Console.ReadKey(true); // true hides input
+            }
+
+            // Now read the next available character to pause
+            Console.ReadKey(true); // true hides input
+        }
+
+        static void Log(string str)
+            => Logger.WriteLine(str);
+
+        [Conditional("DEBUG")]
+        static void LogDebug(string str)
+            => Logger.WriteDebugLine(str);
+
+        static void LogInfo(string str)
+            => Logger.WriteInfoLine(str);
+
+        static void LogWarn(string str)
+            => Logger.WriteWarnLine(str);
+
+        static void LogError(string str)
+            => Logger.WriteErrorLine(str);
+
+        #endregion
     }
 }

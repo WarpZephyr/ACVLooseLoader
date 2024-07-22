@@ -1710,6 +1710,16 @@
 /image/partsthumbnail/shoul_sub_en.tpf.dcx
 /image/partsthumbnail/wepsub.tpf.dcx
 /image/partsthumbnail/wepsub_en.tpf.dcx
+/image/rankingbackimage/backimage00.tpf
+/image/rankingbackimage/backimage01.tpf
+/image/rankingbackimage/backimage02.tpf
+/image/rankingbackimage/backimage03.tpf
+/image/rankingbackimage/backimage04.tpf
+/image/rankingbackimage/backimage05.tpf
+/image/rankingbackimage/backimage06.tpf
+/image/rankingbackimage/backimage07.tpf
+/image/rankingbackimage/backimage08.tpf
+/image/rankingbackimage/backimage09.tpf
 /image/thumbnail/thumb5500.bin
 /image/thumbnail/thumb5501.bin
 /image/thumbnail/thumb5502.bin

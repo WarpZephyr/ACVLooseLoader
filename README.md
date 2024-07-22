@@ -1,25 +1,12 @@
 # ACVLooseLoader
-Automatically loose loads a Armored Core V PS3 game copy.  
-This allows Armored Core V to be run out of its main game archive and make it more moddable.  
-It also allows patches to be made to the game's files to help it run in RPCS3.  
+Automatically loose loads an Armored Core V or Armored Core Verdict Day game.  
+It does so for PS3 and Xbox 360, however Xbox 360 is a bit experimental right now.  
 
-Drag and drop the EBOOT.BIN file from the game folder into the program exe.  
-The path to this will be used to find the needed files.  
+The game will also crash on PS3 without a quick fix to an FMOD file called se_weapon.fsb.  
+The loose loader will automatically expand its file size which appears to fix the issue.  
 
 # Requirements for use
-The game must be removed from any ISO, zip, 7z, or Rar it is in.  
-
-The script files in PS3_GAME/USRDIR/bind/ must be decrypted first.  
-The script files in question are script.bhd.sdat and script.bdt.sdat,  
-They use PS3 encryption and can be decrypted by tools such as TrueAncestor Edat Rebuilder.  
-
-Once decrypted, or once a decrypted copy of the script files is found,  
-Remove any extra extensions and make sure the names are script.bhd and script.bdt,  
-Then place them in PS3_GAME/USRDIR/bind/ or this program's "res" folder.  
-
-The game will also crash without a quick fix to se_weapon.fsb in PS3_GAME/USRDIR/sound/  
-If you have the fix, place it in the program "res" folder for it to be automatically applied.  
-Otherwise, place it in PS3_GAME/USRDIR/sound/ to replace the old one, I recommend backing the old one up anyways.  
+The game files must be removed from any XISO, ISO, zip, 7z, or rar they are in.   
 
 Make sure the .NET 8.0 runtime is installed or the terminal window will immediately close:  
 https://dotnet.microsoft.com/en-us/download/dotnet/8.0  
@@ -29,9 +16,12 @@ Select ".NET Runtime" otherwise.
 
 Most users will need the x64 installer.  
 I'm not sure if this program works on other operating systems or CPU architectures.  
-I have only tested it on Windows x64.  
+This program has only been tested on Windows x64.  
 
-Do not click on the terminal window while it runs, it broke for some reason and I'm not sure why yet.
+On Windows, clicking on the terminal window breaks the program do to quick edit mode.  
+There is now code to call into windows APIs to lock it while in progress.  
+I'm not sure if other platforms have similar issues.  
+Try not to click the window while the program works, at least until it is fully finished.  
 
 # Building
 If you want to build the project you should clone it with these commands in git bash in a folder of your choosing:  
@@ -39,5 +29,8 @@ If you want to build the project you should clone it with these commands in git 
 git clone https://github.com/WarpZephyr/ACVLooseLoader.git  
 git clone https://github.com/WarpZephyr/BinderHandler.git  
 git clone https://github.com/WarpZephyr/SoulsFormatsExtended.git  
+git clone https://github.com/WarpZephyr/BinaryMemory.git  
+git clone https://github.com/WarpZephyr/libps3.git  
 ```
 Then build ACVLooseLoader.  
+Dependencies are subject to possibly change if improvements are made or they are better standardized.

@@ -1,0 +1,53 @@
+// Whether or not to log to a log file.
+LogToFile = true
+
+// Whether or not to pause when finished.
+PauseOnFinish = true
+
+// Whether or not to skip already existing files while unpacking.
+SkipExistingFiles = false
+
+// Whether or not to skip unknown files while unpacking.
+SkipUnknownFiles = false
+
+// Whether or not to skip unpacking main archives.
+SkipMainArchiveUnpack = false
+
+// Whether or not to skip unpacking main archives previously hidden by this tool.
+SkipHiddenMainArchiveUnpack = false
+
+// Whether or not to skip unpacking maps.
+SkipMapUnpack = false
+
+// Whether or not to skip unpacking boot binders.
+SkipBootBinderUnpack = false
+
+// Whether or not to skip unpacking scripts.
+SkipScriptUnpack = false
+
+// Whether or not to skip packing map resources for Armored Core V.
+SkipMapResourcePack = false
+
+// Hide main archive headers for loose load.
+HideHeaders = true
+
+// Applies a fix for FMOD crashes on PS3.
+ApplyFmodCrashFix = true
+
+// Whether or not to use the default platform.
+UseDefaultPlatform = false
+
+// Whether or not to use the default game.
+UseDefaultGame = false
+
+// The default platform to use.
+// Options:
+// PS3
+// Xbox360
+DefaultPlatform = PS3
+
+// The default game to use.
+// Options:
+// ArmoredCoreV
+// ArmoredCoreVD
+DefaultGame = ArmoredCoreV
