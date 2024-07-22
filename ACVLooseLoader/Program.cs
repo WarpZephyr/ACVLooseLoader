@@ -54,7 +54,7 @@ namespace ACVLooseLoader
             }
             catch (Exception ex)
             {
-                FinializePause(ex.Message);
+                Pause(ex.Message);
             }
 #endif
         }
