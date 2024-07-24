@@ -34,6 +34,9 @@ HideHeaders = true
 // Applies a fix for FMOD crashes on PS3.
 ApplyFmodCrashFix = true
 
+// The path provided will be treated as the root folder and the default platform will be used.
+UseManualPath = false
+
 // Whether or not to use the default platform.
 UseDefaultPlatform = false
 

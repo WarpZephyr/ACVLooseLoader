@@ -64,9 +64,34 @@ namespace ACVLooseLoader
             // Show usage
             if (args.Length < 1)
             {
-                throw new UserErrorException("This program has no GUI.\n" +
-                "Please drag and drop EBOOT.BIN or default.xex from game files or pass it as an argument.\n" +
-                "This is used to find your game files.");
+                throw new UserErrorException(
+                    "This program has no UI.\n" +
+                    "To use this program you can:\n" +
+                    "- Provide an executable:\n" +
+                    "   - EBOOT.BIN\n" +
+                    "   - EBOOT.elf\n" +
+                    "   - default.xex\n" +
+                    "- Provide your game folder:\n" +
+                    "   - [YOUR FOLDER]\n" +
+                    "   - [YOUR FOLDER]\\PS3_GAME\\USRDIR\n" +
+                    "   - [YOUR FOLDER]\\USRDIR\n" +
+                    "   - PS3_GAME\\USRDIR\n" +
+                    "   - USRDIR\n" +
+                    "\n" +
+                    "To provide something to the program you can:\n" +
+                    "- Drag and drop it onto the program exe.\n" +
+                    "- Pass it as an argument in a terminal.\n" +
+                    "\n" +
+                    "This is used to find your game files.\n" +
+                    "Multiple things can be provided at once to loose load multiple games if desired.\n" +
+                    "Various config options can also be set for most steps the program takes in config.txt.\n" +
+                    "\n" +
+                    "The currently supported games:\n" +
+                    "- Armored Core V\n" +
+                    "- Armored Core Verdict Day\n" +
+                    "The currently supported platforms:\n" +
+                    "- PS3\n" +
+                    "- Xbox 360 (Experimental)\n");
             }
 
             LooseLoaderConfig config = new LooseLoaderConfig();
@@ -122,35 +147,48 @@ namespace ACVLooseLoader
                 // Get and clean path (things such as slashes can mess stuff up)
                 string rootDir = PathHelper.CleanPath(arg);
 
+                // Tell user if file doesn't exist
+                if (!(File.Exists(rootDir) || Directory.Exists(rootDir)))
+                {
+                    LogError($"Error: Provided path is not an existing file or folder: {rootDir}");
+                    continue;
+                }
+
                 PlatformType platform;
                 GameType game;
 
                 // Determine platform and root
-                if (!config.UseDefaultPlatform)
+                if (config.UseManualPath)
                 {
-                    LogInfo("Determining root file path and platform...");
-                    platform = DeterminePlatform(ref rootDir);
+                    LogInfo("Using provided path as root and default platform.");
+                    platform = config.DefaultPlatform;
                 }
-                else
+                else if (config.UseDefaultPlatform)
                 {
                     LogInfo("Using default platform and determining root path...");
                     platform = config.DefaultPlatform;
                     DetermineRoot(ref rootDir, platform);
                 }
+                else
+                {
+                    LogInfo("Determining root file path and platform...");
+                    platform = DeterminePlatform(ref rootDir);
+                }
 
                 // Determine game
-                if (!config.UseDefaultGame)
-                {
-                    LogInfo("Determining game...");
-                    game = DetermineGameType(platform, rootDir);
-                }
-                else
+                if (config.UseDefaultGame)
                 {
                     LogInfo("Using default game.");
                     game = config.DefaultGame;
                 }
+                else
+                {
+                    LogInfo("Determining game...");
+                    game = DetermineGameType(platform, rootDir);
+                }
 
                 LogInfo($"Determined platform as {platform} and game as {game}.");
+                LogInfo($"Determined root folder as: {rootDir}");
 
                 // Whether or not to skip every step that requires the bind directory
                 if (!(config.SkipMainArchiveUnpack && config.SkipBootBinderUnpack && config.SkipMapUnpack && config.SkipScriptUnpack))
@@ -186,14 +224,14 @@ namespace ACVLooseLoader
                         {
                             if (game == GameType.ArmoredCoreV)
                             {
-                                await UnpackDvdBinderAsync(rootDir, bindDir, "dvdbnd5.bhd", "dvdbnd.bdt", dictionary, config.SkipHiddenMainArchiveUnpack, config.SkipExistingFiles, config.SkipUnknownFiles);
+                                await UnpackMainArchiveAsync(rootDir, bindDir, "dvdbnd5.bhd", "dvdbnd.bdt", dictionary, config.SkipHiddenMainArchiveUnpack, config.SkipExistingFiles, config.SkipUnknownFiles);
                             }
                             else if (game == GameType.ArmoredCoreVD)
                             {
-                                await UnpackDvdBinderAsync(rootDir, bindDir, "dvdbnd5_layer0.bhd", "dvdbnd_layer0.bdt", dictionary, config.SkipHiddenMainArchiveUnpack, config.SkipExistingFiles, config.SkipUnknownFiles);
+                                await UnpackMainArchiveAsync(rootDir, bindDir, "dvdbnd5_layer0.bhd", "dvdbnd_layer0.bdt", dictionary, config.SkipHiddenMainArchiveUnpack, config.SkipExistingFiles, config.SkipUnknownFiles);
                                 if (platform == PlatformType.Xbox360)
                                 {
-                                    await UnpackDvdBinderAsync(rootDir, bindDir, "dvdbnd5_layer1.bhd", "dvdbnd_layer1.bdt", dictionary, config.SkipHiddenMainArchiveUnpack, config.SkipExistingFiles, config.SkipUnknownFiles);
+                                    await UnpackMainArchiveAsync(rootDir, bindDir, "dvdbnd5_layer1.bhd", "dvdbnd_layer1.bdt", dictionary, config.SkipHiddenMainArchiveUnpack, config.SkipExistingFiles, config.SkipUnknownFiles);
                                 }
                             }
                         }
@@ -205,16 +243,6 @@ namespace ACVLooseLoader
                     else
                     {
                         LogInfo("Skipping unpacking main archives.");
-                    }
-
-                    // Hide headers
-                    if (config.HideHeaders)
-                    {
-                        RenameHeader(bindDir, platform, game);
-                    }
-                    else
-                    {
-                        LogInfo("Skipping hiding main archive headers.");
                     }
 
                     // Unpack boot.bnd and boot_2nd.bnd
@@ -254,18 +282,21 @@ namespace ACVLooseLoader
                         string missionBindDir = Path.Combine(bindDir, "mission");
                         if (!Directory.Exists(missionBindDir))
                         {
-                            throw new UserErrorException(
-                                "Error: Could not find mission binder path, game was not unpacked correctly or is missing files.\n" +
-                                "Make sure this tool has the dictionary file in the program resources folder to unpack the game.\n" +
-                                "Tools such as DVDUnbinder can manually unpack the game.\n" +
-                                "Once unpacked, move the unpacked files into:\n" +
-                                "- The \"/PS3_GAME/USRDIR/\" folder on PS3 for disc.\n" +
-                                "- The \"/USRDIR/\" folder on PS3 for digital.\n" +
-                                "- The game folder directly on Xbox 360.");
+                            throw new UserErrorException("Error: Could not find mission binder path, game was not unpacked correctly or is missing files.");
                         }
 
                         BinderHelper.MassUnpackBinders(missionBindDir, rootDir, "*.bnd", false, true, config.SkipExistingFiles);
                         LogInfo("Unpacked maps.");
+                    }
+
+                    // Hide headers
+                    if (config.HideHeaders)
+                    {
+                        RenameHeader(bindDir, platform, game);
+                    }
+                    else
+                    {
+                        LogInfo("Skipping hiding main archive headers.");
                     }
                 }
                 else
@@ -317,94 +348,28 @@ namespace ACVLooseLoader
 
         #region Helpers
 
+        #region Root
+
         static void DetermineRoot(ref string root, PlatformType platform)
         {
-            // Only set if path was a file we are looking for
-            static void SetRoot(ref string root, string file)
+            // Check the possible files
+            if (CheckPlatformFileExists(root, platform))
             {
-                if (root != file)
-                {
-                    root = PathHelper.GetDirectoryName(file, $"Error: Could not get root game folder from path: {root}");
-                }
-            }
-
-            // Check possible executables
-            // If an executable is found set the root directory
-            static bool CheckFile(ref string root, string file, PlatformType platform)
-            {
-                if (File.Exists(file))
-                {
-                    string name = Path.GetFileName(file);
-                    if (platform == PlatformType.PS3)
-                    {
-                        if (name.Equals("EBOOT.BIN", StringComparison.InvariantCultureIgnoreCase))
-                        {
-                            SetRoot(ref root, file);
-                            return true;
-                        }
-                        else if (name.EndsWith(".elf", StringComparison.InvariantCultureIgnoreCase))
-                        {
-                            SetRoot(ref root, file);
-                            return true;
-                        }
-                    }
-                    else if (platform == PlatformType.Xbox360)
-                    {
-                        if (name.EndsWith(".xex", StringComparison.InvariantCultureIgnoreCase))
-                        {
-                            SetRoot(ref root, file);
-                            return true;
-                        }
-                    }
-                }
-
-                return false;
-            }
-
-            // Get the possibly directories,
-            // Then check the possible executables inside of them
-            static bool CheckFolderFile(ref string root, string folder, PlatformType platform)
-            {
-                if (platform == PlatformType.PS3)
-                {
-                    if (CheckFile(ref root, Path.Combine(folder, "EBOOT.BIN"), platform))
-                    {
-                        return true;
-                    }
-
-                    if (CheckFile(ref root, Path.Combine(folder, "EBOOT.elf"), platform))
-                    {
-                        return true;
-                    }
-                }
-                else if (platform == PlatformType.Xbox360)
-                {
-
-                    if (CheckFile(ref root, Path.Combine(root, "default.xex"), platform))
-                    {
-                        return true;
-                    }
-                }
-
-                return false;
-            }
-
-            // Do search
-            if (CheckFile(ref root, root, platform))
-            {
+                root = PathHelper.GetDirectoryName(root, $"Error: Could not get root game folder from path: {root}");
                 return;
             }
             else if (Directory.Exists(root))
             {
-                if (CheckFolderFile(ref root, Path.Combine(root, "PS3_GAME", "USRDIR"), platform))
+                // Check the possible directories for the possible files
+                if (CheckPlatformFolderExists(ref root, Path.Combine(root, "PS3_GAME", "USRDIR"), platform))
                 {
                     return;
                 }
-                else if (CheckFolderFile(ref root, Path.Combine(root, "USRDIR"), platform))
+                else if (CheckPlatformFolderExists(ref root, Path.Combine(root, "USRDIR"), platform))
                 {
                     return;
                 }
-                else if (CheckFolderFile(ref root, root, platform))
+                else if (CheckPlatformFolderExists(ref root, root, platform))
                 {
                     return;
                 }
@@ -413,87 +378,85 @@ namespace ACVLooseLoader
             throw new UserErrorException($"Cannot determine root path from {nameof(PlatformType)} {platform} and path: {root}");
         }
 
-        static PlatformType DeterminePlatform(ref string root)
+        static bool CheckPlatformFileExists(string file, PlatformType platform)
         {
-            // Only set if path was a file we are looking for
-            static void SetRoot(ref string root, string file)
+            if (File.Exists(file))
             {
-                if (root != file)
+                string name = Path.GetFileName(file);
+                if (platform == PlatformType.PS3)
                 {
-                    root = PathHelper.GetDirectoryName(file, $"Error: Could not get root game folder from path: {root}");
-                }
-            }
-
-            // Check possible executables
-            // If an executable is found set the root directory
-            static bool CheckFile(ref string root, string file, out PlatformType platform)
-            {
-                if (File.Exists(file))
-                {
-                    string name = Path.GetFileName(file);
                     if (name.Equals("EBOOT.BIN", StringComparison.InvariantCultureIgnoreCase))
                     {
-                        SetRoot(ref root, file);
-                        platform = PlatformType.PS3;
                         return true;
                     }
-                    else if (name.EndsWith(".xex", StringComparison.InvariantCultureIgnoreCase))
-                    {
-                        SetRoot(ref root, file);
-                        platform = PlatformType.Xbox360;
-                        return true;
-                    }
-                    // Less likely
                     else if (name.EndsWith(".elf", StringComparison.InvariantCultureIgnoreCase))
                     {
-                        SetRoot(ref root, file);
-                        platform = PlatformType.PS3;
                         return true;
                     }
                 }
-
-                platform = default;
-                return false;
+                else if (platform == PlatformType.Xbox360)
+                {
+                    if (name.EndsWith(".xex", StringComparison.InvariantCultureIgnoreCase))
+                    {
+                        return true;
+                    }
+                }
             }
 
-            // Get the possibly directories,
-            // Then check the possible executables inside of them
-            static bool CheckFolderFile(ref string root, string folder, out PlatformType platform)
+            return false;
+        }
+
+        static bool CheckPlatformFolderExists(ref string root, string folder, PlatformType platform)
+        {
+            if (platform == PlatformType.PS3)
             {
-                if (CheckFile(ref root, Path.Combine(folder, "EBOOT.BIN"), out platform))
+                if (CheckPlatformFileExists(Path.Combine(folder, "EBOOT.BIN"), platform))
                 {
+                    root = folder;
                     return true;
                 }
-
-                if (CheckFile(ref root, Path.Combine(folder, "EBOOT.elf"), out platform))
+                else if (CheckPlatformFileExists(Path.Combine(folder, "EBOOT.elf"), platform))
                 {
+                    root = folder;
                     return true;
                 }
-
-                if (CheckFile(ref root, Path.Combine(root, "default.xex"), out platform))
+            }
+            else if (platform == PlatformType.Xbox360)
+            {
+                if (CheckPlatformFileExists(Path.Combine(root, "default.xex"), platform))
                 {
+                    // Just checking in root here...
                     return true;
                 }
-
-                return false;
             }
 
-            // Do search
-            if (CheckFile(ref root, root, out PlatformType platform))
+            return false;
+        }
+
+        #endregion
+
+        #region Platform
+
+        static PlatformType DeterminePlatform(ref string root)
+        {
+            // Check the possible files
+            if (FindPlatformByFile(root, out PlatformType platform))
             {
+                root = PathHelper.GetDirectoryName(root, $"Error: Could not get root game folder from path: {root}");
                 return platform;
             }
             else if (Directory.Exists(root))
             {
-                if (CheckFolderFile(ref root, Path.Combine(root, "PS3_GAME", "USRDIR"), out platform))
+                // Check the possible directories for the possible files
+                if (FindPlatformByFolder(ref root, Path.Combine(root, "PS3_GAME", "USRDIR"), out platform))
                 {
                     return platform;
                 }
-                else if (CheckFolderFile(ref root, Path.Combine(root, "USRDIR"), out platform))
+                else if (FindPlatformByFolder(ref root, Path.Combine(root, "USRDIR"), out platform))
                 {
                     return platform;
                 }
-                else if (CheckFolderFile(ref root, root, out platform))
+                else if (FindPlatformByFolder(ref root, root, out platform))
                 {
                     return platform;
                 }
@@ -501,6 +464,58 @@ namespace ACVLooseLoader
 
             throw new UserErrorException($"Cannot determine {nameof(PlatformType)} from path: {root}");
         }
+
+        static bool FindPlatformByFile(string file, out PlatformType platform)
+        {
+            if (File.Exists(file))
+            {
+                string name = Path.GetFileName(file);
+                if (name.Equals("EBOOT.BIN", StringComparison.InvariantCultureIgnoreCase))
+                {
+                    platform = PlatformType.PS3;
+                    return true;
+                }
+                else if (name.EndsWith(".xex", StringComparison.InvariantCultureIgnoreCase))
+                {
+                    platform = PlatformType.Xbox360;
+                    return true;
+                }
+                // Less likely
+                else if (name.EndsWith(".elf", StringComparison.InvariantCultureIgnoreCase))
+                {
+                    platform = PlatformType.PS3;
+                    return true;
+                }
+            }
+
+            platform = default;
+            return false;
+        }
+
+        static bool FindPlatformByFolder(ref string root, string folder, out PlatformType platform)
+        {
+            if (FindPlatformByFile(Path.Combine(folder, "EBOOT.BIN"), out platform))
+            {
+                root = folder;
+                return true;
+            }
+            else if (FindPlatformByFile(Path.Combine(folder, "EBOOT.elf"), out platform))
+            {
+                root = folder;
+                return true;
+            }
+            else if (FindPlatformByFile(Path.Combine(root, "default.xex"), out platform))
+            {
+                // Just checking in root here...
+                return true;
+            }
+
+            return false;
+        }
+
+        #endregion
+
+        #region Game
 
         static GameType DetermineGameType(PlatformType platform, string rootDir)
         {
@@ -522,7 +537,7 @@ namespace ACVLooseLoader
                         string sfoPath = Path.Combine(parentDir, "PARAM.SFO");
                         if (File.Exists(sfoPath)
                             && PARAMSFO.IsRead(sfoPath, out PARAMSFO? sfo)
-                            && TryDetermineGameBySFO(sfo, out game))
+                            && FindGameBySFO(sfo, out game))
                         {
                             return game;
                         }
@@ -534,7 +549,7 @@ namespace ACVLooseLoader
 
             // Determine which game we are loose loading for by files
             LogInfo("Attempting to determine game by checking files...");
-            if (TryDetermineGameByFiles(rootDir, out game))
+            if (FindGameByFile(rootDir, out game))
             {
                 return game;
             }
@@ -542,7 +557,7 @@ namespace ACVLooseLoader
             throw new UserErrorException($"Game could not be determined from {nameof(PlatformType)} {platform} and path: {rootDir}");
         }
 
-        static bool TryDetermineGameByFiles(string rootDir, out GameType game)
+        static bool FindGameByFile(string rootDir, out GameType game)
         {
             string bindDir = Path.Combine(rootDir, "bind");
             string acvPath = Path.Combine(bindDir, "dvdbnd.bdt");
@@ -563,7 +578,7 @@ namespace ACVLooseLoader
             return false;
         }
 
-        static bool TryDetermineGameBySFO(PARAMSFO sfo, out GameType game)
+        static bool FindGameBySFO(PARAMSFO sfo, out GameType game)
         {
             // Try to find the title name
             if (sfo.Parameters.TryGetValue("TITLE", out PARAMSFO.Parameter? parameter))
@@ -608,7 +623,9 @@ namespace ACVLooseLoader
             return false;
         }
 
-        static async Task UnpackDvdBinderAsync(string rootDir, string bindDir, string bhdName, string bdtName, BinderHashDictionary dictionary, bool skipHidden, bool skipExisting, bool skipUnknown)
+        #endregion
+
+        static async Task UnpackMainArchiveAsync(string rootDir, string bindDir, string bhdName, string bdtName, BinderHashDictionary dictionary, bool skipHidden, bool skipExisting, bool skipUnknown)
         {
             string bhdPath = Path.Combine(bindDir, bhdName);
             if (!File.Exists(bhdPath))
@@ -695,7 +712,7 @@ namespace ACVLooseLoader
             }
 
             string textureBNDPath = Path.Combine(dir, $"{mapID}_htdcx.bnd");
-            if (!(skipExisting && File.Exists(modelBNDPath)))
+            if (!(skipExisting && File.Exists(textureBNDPath)))
             {
                 var textureBND = BinderHelper.PackFilesIntoBinder3(dir, ".tpf.dcx", "_l.tpf.dcx", false);
                 SetAcvMapBinderInfo(textureBND);
@@ -745,26 +762,38 @@ namespace ACVLooseLoader
             // Check for PS3 SDAT encryption
             if (platform == PlatformType.PS3)
             {
+                // Only bother the user with this message if they are using PS3, but still check anyways.
                 LogInfo("Checking scripts for encryption...");
-                if (headerPath.EndsWith(".sdat") && NPD.Is(headerPath))
-                {
-                    LogInfo("Decrypting scripts header file...");
+            }
 
-                    string headerSdatPath = headerPath;
-                    headerPath = headerPath.Replace(".sdat", string.Empty); // Replace path with removed .sdat
-                    EDAT.DecryptSdatFile(headerSdatPath, headerPath);
-                    LogInfo("Decrypted scripts header file.");
+            if (headerPath.EndsWith(".sdat", StringComparison.InvariantCultureIgnoreCase) && NPD.Is(headerPath))
+            {
+                if (platform != PlatformType.PS3)
+                {
+                    LogWarn("Warning: Detected PS3 encryption on scripts header file when platform was not set to PS3!");
                 }
 
-                if (dataPath.EndsWith(".sdat") && NPD.Is(dataPath))
-                {
-                    LogInfo("Decrypting scripts data file...");
+                LogInfo("Decrypting scripts header file...");
 
-                    string dataSdatPath = dataPath;
-                    dataPath = dataPath.Replace(".sdat", string.Empty); // Replace path with removed .sdat
-                    EDAT.DecryptSdatFile(dataSdatPath, dataPath);
-                    LogInfo("Decrypted scripts data file.");
+                string headerSdatPath = headerPath;
+                headerPath = headerPath.Replace(".sdat", string.Empty); // Replace path with removed .sdat
+                EDAT.DecryptSdatFile(headerSdatPath, headerPath);
+                LogInfo("Decrypted scripts header file.");
+            }
+
+            if (dataPath.EndsWith(".sdat", StringComparison.InvariantCultureIgnoreCase) && NPD.Is(dataPath))
+            {
+                if (platform != PlatformType.PS3)
+                {
+                    LogWarn("Warning: Detected PS3 encryption on scripts data file when platform was not set to PS3!");
                 }
+
+                LogInfo("Decrypting scripts data file...");
+
+                string dataSdatPath = dataPath;
+                dataPath = dataPath.Replace(".sdat", string.Empty); // Replace path with removed .sdat
+                EDAT.DecryptSdatFile(dataSdatPath, dataPath);
+                LogInfo("Decrypted scripts data file.");
             }
 
             // Check header file

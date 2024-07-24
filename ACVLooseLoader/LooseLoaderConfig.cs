@@ -68,6 +68,11 @@ namespace ACVLooseLoader
         public bool ApplyFmodCrashFix { get; set; } = true;
 
         /// <summary>
+        /// The path provided will be treated as the root folder and the default platform will be used.
+        /// </summary>
+        public bool UseManualPath { get; set; } = false;
+
+        /// <summary>
         /// Whether or not to use the default platform.
         /// </summary>
         public bool UseDefaultPlatform { get; set; } = false;
@@ -109,6 +114,7 @@ namespace ACVLooseLoader
             SkipMapResourcePack = SearchBoolProperty(parser, SkipMapResourcePack);
             HideHeaders = SearchBoolProperty(parser, HideHeaders);
             ApplyFmodCrashFix = SearchBoolProperty(parser, ApplyFmodCrashFix);
+            UseManualPath = SearchBoolProperty(parser, UseManualPath);
             UseDefaultPlatform = SearchBoolProperty(parser, UseDefaultPlatform);
             UseDefaultGame = SearchBoolProperty(parser, UseDefaultGame);
             DefaultPlatform = SearchEnumProperty(parser, DefaultPlatform);
