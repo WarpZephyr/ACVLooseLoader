@@ -87,7 +87,7 @@ Newly discovered names can be placed there.
 Hash collisions, where multiple names give the same hash, are very common.  
 The hashes are only 32-bit, so be very careful of this when checking.  
 
-Several files in the game have aliases the game resolves to get the full path.  
+Several paths in the game have aliases the game resolves to get the full path.  
 Aliases can also be used for aliases.  
 The files "acv.ini" and "acv2.ini" in the system folder are usually the most useful for checking this.  
 
