@@ -1957,6 +1957,7 @@
 /lang/en/menu/betaversion_msg.drb
 /lang/en/menu/bootlogo.drb
 /lang/en/menu/copyrightlogo_ps3.drb
+/lang/en/menu/copyrightlogo_xbox.drb
 /lang/en/menu/custommapedit.drb
 /lang/en/menu/debriefing.drb
 /lang/en/menu/design.drb
@@ -2190,6 +2191,7 @@
 /lang/fr/menu/coloring.drb
 /lang/fr/menu/coloring.tpf
 /lang/fr/menu/copyrightlogo_ps3.drb
+/lang/fr/menu/copyrightlogo_xbox.drb
 /lang/fr/menu/custommapedit.drb
 /lang/fr/menu/debriefing.drb
 /lang/fr/menu/design.drb
@@ -2422,6 +2424,7 @@
 /lang/ge/menu/coloring.drb
 /lang/ge/menu/coloring.tpf
 /lang/ge/menu/copyrightlogo_ps3.drb
+/lang/ge/menu/copyrightlogo_xbox.drb
 /lang/ge/menu/custommapedit.drb
 /lang/ge/menu/debriefing.drb
 /lang/ge/menu/design.drb
@@ -2654,6 +2657,7 @@
 /lang/it/menu/coloring.drb
 /lang/it/menu/coloring.tpf
 /lang/it/menu/copyrightlogo_ps3.drb
+/lang/it/menu/copyrightlogo_xbox.drb
 /lang/it/menu/custommapedit.drb
 /lang/it/menu/debriefing.drb
 /lang/it/menu/design.drb
@@ -2894,6 +2898,8 @@
 /lang/jp/menu/coloring.tpf
 /lang/jp/menu/copyrightlogo_ps3.drb
 /lang/jp/menu/copyrightlogo_ps3.tpf
+/lang/jp/menu/copyrightlogo_xbox.drb
+/lang/jp/menu/copyrightlogo_xbox.tpf
 /lang/jp/menu/custommapedit.drb
 /lang/jp/menu/custommapedit.tpf
 /lang/jp/menu/debriefing.drb
@@ -3165,6 +3171,7 @@
 /lang/kr/menu/betaversion_msg.drb
 /lang/kr/menu/bootlogo.drb
 /lang/kr/menu/copyrightlogo_ps3.drb
+/lang/kr/menu/copyrightlogo_xbox.drb
 /lang/kr/menu/custommapedit.drb
 /lang/kr/menu/debriefing.drb
 /lang/kr/menu/design.drb
@@ -3387,6 +3394,7 @@
 /lang/sp/menu/coloring.drb
 /lang/sp/menu/coloring.tpf
 /lang/sp/menu/copyrightlogo_ps3.drb
+/lang/sp/menu/copyrightlogo_xbox.drb
 /lang/sp/menu/custommapedit.drb
 /lang/sp/menu/debriefing.drb
 /lang/sp/menu/design.drb
@@ -18878,6 +18886,7 @@
 /saveicon/icon_vslogging.png
 /sfx/acv_commoneffects.ffxbnd
 /sfx/shader/ffx_ps3_shader.bnd
+/sfx/shader/ffx_xenon_shader.bnd
 /shader/boot_shader.bnd
 /sound/acv.fev
 /sound/acv_bgm.fev

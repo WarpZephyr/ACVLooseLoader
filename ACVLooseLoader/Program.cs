@@ -91,7 +91,7 @@ namespace ACVLooseLoader
                     "- Armored Core Verdict Day\n" +
                     "The currently supported platforms:\n" +
                     "- PS3\n" +
-                    "- Xbox 360 (Experimental)\n");
+                    "- Xbox 360");
             }
 
             LooseLoaderConfig config = new LooseLoaderConfig();
@@ -307,16 +307,16 @@ namespace ACVLooseLoader
                 // Pack map resources
                 if (game == GameType.ArmoredCoreV)
                 {
-                    if (!config.SkipMapResourcePack)
+                    if (config.SkipMapResourcePack)
+                    {
+                        LogInfo("Skipping packing map resources.");
+                    }
+                    else
                     {
                         // Pack map models and textures
                         LogInfo("Packing models and textures in each map...");
                         PackAcvMapResources(Path.Combine(rootDir, "model", "map"), config.SkipExistingFiles);
                         LogInfo("Packed models and textures in each map.");
-                    }
-                    else
-                    {
-                        LogInfo("Skipping packing map resources.");
                     }
                 }
 
@@ -704,7 +704,7 @@ namespace ACVLooseLoader
             {
                 var modelBND = BinderHelper.PackFilesIntoBinder3(dir, [".flv", ".hmd", ".smd", ".mlb"], false);
                 SetAcvMapBinderInfo(modelBND);
-                modelBND.Write();
+                modelBND.Write(modelBNDPath);
             }
             else
             {
@@ -716,7 +716,7 @@ namespace ACVLooseLoader
             {
                 var textureBND = BinderHelper.PackFilesIntoBinder3(dir, ".tpf.dcx", "_l.tpf.dcx", false);
                 SetAcvMapBinderInfo(textureBND);
-                textureBND.Write();
+                textureBND.Write(textureBNDPath);
             }
             else
             {

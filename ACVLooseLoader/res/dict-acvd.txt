@@ -4460,6 +4460,8 @@
 /lang/jp/menu/coloring.tpf.dcx
 /lang/jp/menu/copyrightlogo_ps3.drb.dcx
 /lang/jp/menu/copyrightlogo_ps3.tpf.dcx
+/lang/jp/menu/copyrightlogo_xbox.drb.dcx
+/lang/jp/menu/copyrightlogo_xbox.tpf.dcx
 /lang/jp/menu/customai.drb.dcx
 /lang/jp/menu/customai.tpf.dcx
 /lang/jp/menu/custommapedit.drb.dcx
@@ -4473,6 +4475,8 @@
 /lang/jp/menu/emblemcategory.bin
 /lang/jp/menu/fromlogo.drb.dcx
 /lang/jp/menu/fromlogo.tpf.dcx
+/lang/jp/menu/gameboot.drb.dcx
+/lang/jp/menu/gameboot.tpf.dcx
 /lang/jp/menu/garage.drb.dcx
 /lang/jp/menu/garage.tpf.dcx
 /lang/jp/menu/hardcoremode.drb.dcx
